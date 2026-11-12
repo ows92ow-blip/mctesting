@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>DeepSeek</title>
+<!-- 強制設定外層網頁標籤的圖標，加上時間戳避免瀏覽器快取 -->
+<link rel="icon" href="https://www.deepseek.com/favicon.ico?v=99">
+<style>
+  :root{ --bar-h:46px; }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; height:100%; overflow:hidden; background:#0f1114; color:#e7e9ee;
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;
+  }
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column; }
+
+  #bar{
+    flex:0 0 var(--bar-h); display:flex; align-items:center; gap:10px;
+    padding:0 12px; background:#171a1f; border-bottom:1px solid #2a2f38;
+  }
+  #bar .dot{ width:10px; height:10px; border-radius:50%; background:#3ddc84; flex:0 0 auto; }
+  #bar .title{ font-size:13.5px; font-weight:600; letter-spacing:.2px; white-space:nowrap; }
+  #bar .spacer{ flex:1 1 auto; }
+  #bar button{
+    font:inherit; font-size:12.5px; padding:6px 12px; border-radius:7px;
+    background:#252b34; color:#dfe4ec; border:1px solid #384150; cursor:pointer;
+    white-space:nowrap;
+  }
+  #bar button:hover{ background:#313945; }
+  #bar button:active{ transform:translateY(1px); }
+
+  #stage{ position:relative; flex:1 1 auto; background:#0b0d10; }
+  #game{
+    position:absolute; inset:0; width:100%; height:100%;
+    border:0; display:block; background:#0b0d10;
+  }
+
+  #loading{
+    position:absolute; inset:0; z-index:5;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    background:#0b0d10; transition:opacity .35s ease;
+  }
+  #loading.hide{ opacity:0; pointer-events:none; }
+  .spinner{
+    width:38px; height:38px; border-radius:50%;
+    border:3px solid #2b3340; border-top-color:#3ddc84;
+    animation:spin .9s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #loading p{ margin:0; font-size:13px; color:#8b95a5; }
+
+  #lockScreen{
+    position:fixed; inset:0; z-index:100;
+    display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(1200px 700px at 50% 30%, #182030 0%, #0b0d10 70%);
+    padding:20px;
+  }
+  #lockScreen.hide{ display:none; }
+  .lock-card{
+    width:100%; max-width:360px; background:#171a1f;
+    border:1px solid #2a2f38; border-radius:16px;
+    padding:28px 24px 24px; box-shadow:0 20px 60px rgba(0,0,0,.55);
+  }
+  .lock-icon{
+    width:46px; height:46px; margin:0 auto 14px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:12px; background:#1f2530; border:1px solid #2f3744;
+    font-size:22px;
+  }
+  .lock-card h1{
+    margin:0 0 6px; font-size:18px; font-weight:700; text-align:center;
+  }
+  .lock-card .sub{
+    margin:0 0 20px; font-size:12.5px; color:#8b95a5; text-align:center; line-height:1.6;
+  }
+  .lock-card input{
+    width:100%; padding:11px 13px; font:inherit; font-size:14px;
+    color:#e7e9ee; background:#0f1216; border:1px solid #303845;
+    border-radius:9px; outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  .lock-card input:focus{
+    border-color:#3ddc84; box-shadow:0 0 0 3px rgba(61,220,132,.14);
+  }
+  .lock-card input::placeholder{ color:#5f6a7a; }
+  .lock-card button{
+    width:100%; margin-top:12px; padding:11px 14px;
+    font:inherit; font-size:14px; font-weight:600;
+    color:#08120c; background:#3ddc84; border:0; border-radius:9px;
+    cursor:pointer; transition:filter .15s, transform .08s;
+  }
+  .lock-card button:hover{ filter:brightness(1.06); }
+  .lock-card button:active{ transform:translateY(1px); }
+</style>
+</head>
+<body>
+
+<div id="lockScreen">
+  <div class="lock-card">
+    <div class="lock-icon">🔒</div>
+    <h1>需要密碼才能進入</h1>
+    <p class="sub">請輸入訪問密碼</p>
+    <input id="pwdInput" type="password" placeholder="請輸入密碼" autocomplete="off" autofocus>
+    <button id="pwdBtn" type="button">enter</button>
+  </div>
+</div>
+
+<div id="app">
+  <header id="bar">
+    <span class="dot"></span>
+    <span class="title">DeepSeek</span>
+    <span class="spacer"></span>
+    <button id="btnReload" type="button">reload</button>
+    <button id="btnFull"   type="button">full screen</button>
+  </header>
+
+  <div id="stage">
+    <iframe
+      id="game"
+      title="DeepSeek"
+      allow="fullscreen; autoplay; gamepad; accelerometer; gyroscope; clipboard-write; encrypted-media; cross-origin-isolated"
+      allowfullscreen
+      referrerpolicy="no-referrer-when-downgrade"
+      loading="lazy"></iframe>
+
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>loading...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // 這裡填入您的 Cloudflare Worker 鏈接
+  var PROXY_URL = 'https://hajiminbeilvdou.ows92ow.workers.dev/'; 
+  
+  var PASSWORD = 'minecraft';
+  var WRONG_PWD_URL = 'https://platform.deepseek.com/';
+
+  var lockScreen = document.getElementById('lockScreen');
+  var pwdInput   = document.getElementById('pwdInput');
+  var pwdBtn     = document.getElementById('pwdBtn');
+
+  var iframe  = document.getElementById('game');
+  var loading = document.getElementById('loading');
+  var stage   = document.getElementById('stage');
+
+  var loaded = false;
+  var unlocked = false;
+
+  function hideLoading() {
+    if (loaded) return;
+    loaded = true;
+    loading.classList.add('hide');
+  }
+
+  function loadGame() {
+    loaded = false;
+    loading.classList.remove('hide');
+    // 加上時間戳，強制刷新 iframe 內的頁面
+    iframe.src = PROXY_URL + '?t=' + Date.now();
+  }
+
+  function unlock() {
+    if (unlocked) return;
+    unlocked = true;
+    lockScreen.classList.add('hide');
+    loadGame(); 
+  }
+
+  function tryUnlock() {
+    var val = pwdInput.value;
+    if (val === PASSWORD) {
+      unlock(); 
+    } else {
+      window.location.href = WRONG_PWD_URL;
+    }
+  }
+
+  pwdBtn.addEventListener('click', tryUnlock);
+  pwdInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      tryUnlock();
+    }
+  });
+
+  iframe.addEventListener('load', hideLoading);
+  setTimeout(hideLoading, 8000);
+
+  document.getElementById('btnReload').addEventListener('click', function () {
+    if (!unlocked) return;
+    loadGame();
+  });
+
+  document.getElementById('btnFull').addEventListener('click', function () {
+    if (!unlocked) return;
+    var el = stage;
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+
+    if (!fsEl) {
+      if (el.requestFullscreen)            el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } else {
+      if (document.exitFullscreen)            document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+  });
+
+  document.addEventListener('fullscreenchange', function () {
+    window.dispatchEvent(new Event('resize'));
+  });
+})();
+</script>
+</body>
+</html>
